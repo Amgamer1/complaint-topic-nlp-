@@ -4,17 +4,13 @@ This project analyzes consumer complaint narratives using Natural Language Proce
 
 ## Dataset
 
-The dataset used for this project is based on the Consumer Financial Protection Bureau Consumer Complaint Database.
+The dataset used for this project is the **CFPB Consumer Complaint Database** dataset available on Kaggle.
 
 Dataset source:
-Consumer Financial Protection Bureau. Consumer Complaint Database.
-https://www.consumerfinance.gov/data-research/consumer-complaints/
 
-Field documentation:
-Consumer Financial Protection Bureau. Consumer Complaint Database API documentation: Field reference.
-https://cfpb.github.io/api/ccdb/fields.html
+Voloshyn, I. (n.d.). *CFPB Consumer Complaint Database* [Data set]. Kaggle. Retrieved July 5, 2026, from https://www.kaggle.com/datasets/iuriivoloshyn/cfpb-consumer-complaint-database
 
-The CSV file is not included directly in this GitHub repository. To run the project, the user must download or export the complaint data from the CFPB Consumer Complaint Database and place the file manually inside a folder called `data`.
+The CSV file is not included directly in this GitHub repository. To run the project, the user must download the dataset from Kaggle and place the file manually inside a folder called `data`.
 
 The required file path is:
 
@@ -102,3 +98,7 @@ pandas
 matplotlib
 scikit-learn
 ```
+
+## Reference
+
+Voloshyn, I. (n.d.). *CFPB Consumer Complaint Database* [Data set]. Kaggle. Retrieved July 5, 2026, from https://www.kaggle.com/datasets/iuriivoloshyn/cfpb-consumer-complaint-database
