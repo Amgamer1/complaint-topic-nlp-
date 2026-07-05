@@ -4,138 +4,335 @@ from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.decomposition import LatentDirichletAllocation, NMF
+from sklearn.feature_extraction.text import (
+    CountVectorizer,
+    TfidfVectorizer,
+    ENGLISH_STOP_WORDS
+)
 
 
-DATA_PATH = Path("data/cfpb_complaints.csv")
+# --------------------------------------------------
+# Project settings
+# --------------------------------------------------
+
+DATA_PATH = Path("data/CFPB_Consumer_Complaints_2024.csv")
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-TEXT_COLUMN = "Consumer complaint narrative"
-N_TOPICS = 5
-N_WORDS = 10
-SAMPLE_SIZE = 5000
+TEXT_COLUMN = "consumer_complaint_narrative"
 
+N_TOPICS = 5
+N_WORDS_PER_TOPIC = 10
+
+
+# --------------------------------------------------
+# Text cleaning function
+# --------------------------------------------------
 
 def clean_text(text):
     """
-    Cleans complaint text for NLP analysis.
+    Clean complaint text for NLP topic analysis.
     """
     text = str(text).lower()
+
+    # Remove URLs
     text = re.sub(r"http\S+|www\S+", " ", text)
+
+    # Remove CFPB redaction patterns such as XXXX
+    text = re.sub(r"\b[x]{2,}\b", " ", text)
+
+    # Remove numbers and punctuation
     text = re.sub(r"[^a-z\s]", " ", text)
+
+    # Remove very short words
+    text = re.sub(r"\b[a-z]{1,2}\b", " ", text)
+
+    # Remove extra spaces
     text = re.sub(r"\s+", " ", text).strip()
+
     return text
 
 
-def get_top_words(model, feature_names, n_words=10):
+# --------------------------------------------------
+# Topic helper functions
+# --------------------------------------------------
+
+def get_top_words(model, feature_names, n_words):
     """
-    Extracts the most important words for each topic.
+    Return the most important words for each topic.
     """
     topics = []
 
-    for topic_idx, topic in enumerate(model.components_):
+    for topic_index, topic in enumerate(model.components_):
         top_indices = topic.argsort()[:-n_words - 1:-1]
-        top_terms = [feature_names[i] for i in top_indices]
+        top_words = [feature_names[i] for i in top_indices]
 
         topics.append({
-            "topic": f"Topic {topic_idx + 1}",
-            "top_words": ", ".join(top_terms)
+            "topic_number": topic_index + 1,
+            "top_words": ", ".join(top_words)
         })
 
     return pd.DataFrame(topics)
 
 
+def save_topic_examples(original_texts, cleaned_texts, topic_matrix, model_name):
+    """
+    Save example complaints for each topic.
+    The examples are selected based on the strongest topic score.
+    """
+    examples = []
+
+    topic_labels = topic_matrix.argmax(axis=1) + 1
+    topic_strengths = topic_matrix.max(axis=1)
+
+    temp_df = pd.DataFrame({
+        "original_text": original_texts,
+        "clean_text": cleaned_texts,
+        "topic": topic_labels,
+        "topic_strength": topic_strengths
+    })
+
+    for topic_number in sorted(temp_df["topic"].unique()):
+        topic_df = temp_df[temp_df["topic"] == topic_number]
+        topic_df = topic_df.sort_values(by="topic_strength", ascending=False)
+
+        for _, row in topic_df.head(3).iterrows():
+            examples.append({
+                "model": model_name,
+                "topic": topic_number,
+                "topic_strength": row["topic_strength"],
+                "example_complaint": row["original_text"]
+            })
+
+    examples_df = pd.DataFrame(examples)
+    examples_df.to_csv(
+        OUTPUT_DIR / f"{model_name.lower()}_topic_examples.csv",
+        index=False
+    )
+
+
 def plot_topic_distribution(topic_labels, title, filename):
     """
-    Creates and saves a topic distribution chart.
+    Save a bar chart showing how many complaints belong to each topic.
     """
-    counts = topic_labels.value_counts().sort_index()
+    topic_counts = pd.Series(topic_labels).value_counts().sort_index()
 
     plt.figure(figsize=(8, 5))
-    counts.plot(kind="bar")
+    topic_counts.plot(kind="bar")
     plt.title(title)
-    plt.xlabel("Topic")
+    plt.xlabel("Topic number")
     plt.ylabel("Number of complaints")
     plt.tight_layout()
     plt.savefig(OUTPUT_DIR / filename)
     plt.close()
 
 
+# --------------------------------------------------
+# Main analysis
+# --------------------------------------------------
+
 def main():
     print("Loading dataset...")
+
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(
+            f"Could not find the dataset at: {DATA_PATH}\n"
+            "Make sure the CSV file is inside the data folder."
+        )
+
     df = pd.read_csv(DATA_PATH, low_memory=False)
 
-    print("Dataset shape:", df.shape)
-    print("Columns:", df.columns.tolist())
+    print("Dataset loaded successfully.")
+    print(f"Rows: {df.shape[0]}")
+    print(f"Columns: {df.shape[1]}")
 
     if TEXT_COLUMN not in df.columns:
         raise ValueError(
-            f"Column '{TEXT_COLUMN}' not found. Please check the CSV column names."
+            f"The column '{TEXT_COLUMN}' was not found.\n"
+            f"Available columns are:\n{df.columns.tolist()}"
         )
 
-    print("Cleaning complaint narratives...")
-    texts = df[TEXT_COLUMN].dropna().drop_duplicates()
+    # Save basic dataset overview
+    overview_text = (
+        f"Dataset shape: {df.shape}\n"
+        f"Columns: {df.columns.tolist()}\n"
+        f"Text column used: {TEXT_COLUMN}\n"
+        f"Missing narratives: {df[TEXT_COLUMN].isna().sum()}\n"
+        f"Non-empty narratives: {df[TEXT_COLUMN].notna().sum()}\n"
+    )
 
-    if len(texts) > SAMPLE_SIZE:
-        texts = texts.sample(SAMPLE_SIZE, random_state=42)
+    with open(OUTPUT_DIR / "dataset_overview.txt", "w", encoding="utf-8") as file:
+        file.write(overview_text)
 
-    cleaned_texts = texts.apply(clean_text)
+    # Keep only useful columns if they exist
+    useful_columns = [TEXT_COLUMN]
 
-    cleaned_texts = cleaned_texts[
-        cleaned_texts.str.split().str.len() >= 20
+    for column in ["product", "issue", "company_name", "date_received"]:
+        if column in df.columns:
+            useful_columns.append(column)
+
+    complaints = df[useful_columns].copy()
+
+    # Remove missing and duplicate narratives
+    complaints = complaints.dropna(subset=[TEXT_COLUMN])
+    complaints = complaints.drop_duplicates(subset=[TEXT_COLUMN])
+
+    print(
+        "Usable complaints after removing missing and duplicate texts:",
+        len(complaints)
+    )
+
+    # Clean complaint texts
+    complaints["clean_text"] = complaints[TEXT_COLUMN].apply(clean_text)
+
+    # Remove very short cleaned texts
+    complaints["word_count"] = complaints["clean_text"].apply(
+        lambda text: len(text.split())
+    )
+
+    complaints = complaints[complaints["word_count"] >= 20]
+
+    print(
+        "Usable complaints after cleaning and length filtering:",
+        len(complaints)
+    )
+
+    if len(complaints) < N_TOPICS:
+        raise ValueError(
+            "There are not enough usable complaint texts for the selected number of topics."
+        )
+
+    complaints.to_csv(OUTPUT_DIR / "cleaned_complaints.csv", index=False)
+
+    original_texts = complaints[TEXT_COLUMN].reset_index(drop=True)
+    cleaned_texts = complaints["clean_text"].reset_index(drop=True)
+
+    # --------------------------------------------------
+    # Custom stop words
+    # --------------------------------------------------
+    # These words appeared too often in the first run and made the topics repetitive.
+    # Removing them helps the topic models show more meaningful patterns.
+
+    extra_stop_words = [
+        "complaint",
+        "consumer",
+        "company",
+        "account",
+        "accounts",
+        "credit",
+        "debt",
+        "collection",
+        "collections",
+        "report",
+        "reports",
+        "reporting",
+        "enhanced",
+        "recovery",
+        "service",
+        "services",
+        "told",
+        "said",
+        "would",
+        "could",
+        "also",
+        "one",
+        "get",
+        "got",
+        "made",
+        "make",
+        "called",
+        "sent",
+        "received",
+        "asked",
+        "time",
+        "day",
+        "days",
+        "phone",
+        "letter",
+        "request",
+        "requested",
+        "information",
+        "number",
+        "erc",
+        "pay",
+        "paid",
+        "payment",
+        "payments",
+        "did",
+        "does",
+        "know",
+        "want",
+        "using",
+        "use",
+        "years",
+        "year",
+        "month",
+        "months"
     ]
 
-    cleaned_df = pd.DataFrame({
-        "clean_text": cleaned_texts
-    })
+    custom_stop_words = list(ENGLISH_STOP_WORDS.union(extra_stop_words))
 
-    cleaned_df.to_csv(OUTPUT_DIR / "cleaned_complaints.csv", index=False)
+    # --------------------------------------------------
+    # Vectorization method 1: CountVectorizer
+    # --------------------------------------------------
 
-    print("Number of cleaned texts:", len(cleaned_texts))
+    print("\nCreating CountVectorizer matrix...")
 
-    print("Vectorizing texts with CountVectorizer...")
     count_vectorizer = CountVectorizer(
-        stop_words="english",
+        stop_words=custom_stop_words,
         max_df=0.90,
-        min_df=5,
-        max_features=5000
+        min_df=2,
+        max_features=2000,
+        ngram_range=(1, 2)
     )
 
     count_matrix = count_vectorizer.fit_transform(cleaned_texts)
 
-    print("Vectorizing texts with TF-IDF...")
+    print(f"CountVectorizer matrix shape: {count_matrix.shape}")
+
+    # --------------------------------------------------
+    # Vectorization method 2: TF-IDF Vectorizer
+    # --------------------------------------------------
+
+    print("\nCreating TF-IDF matrix...")
+
     tfidf_vectorizer = TfidfVectorizer(
-        stop_words="english",
+        stop_words=custom_stop_words,
         max_df=0.90,
-        min_df=5,
-        max_features=5000
+        min_df=2,
+        max_features=2000,
+        ngram_range=(1, 2)
     )
 
     tfidf_matrix = tfidf_vectorizer.fit_transform(cleaned_texts)
 
-    print("Running LDA topic model...")
+    print(f"TF-IDF matrix shape: {tfidf_matrix.shape}")
+
+    # --------------------------------------------------
+    # Topic extraction method 1: LDA
+    # --------------------------------------------------
+
+    print("\nRunning LDA topic model...")
+
     lda_model = LatentDirichletAllocation(
         n_components=N_TOPICS,
         random_state=42,
         learning_method="batch",
-        max_iter=20
+        max_iter=30
     )
 
     lda_topic_matrix = lda_model.fit_transform(count_matrix)
+
     lda_topics = get_top_words(
         lda_model,
         count_vectorizer.get_feature_names_out(),
-        N_WORDS
+        N_WORDS_PER_TOPIC
     )
 
     lda_topics.to_csv(OUTPUT_DIR / "lda_topics.csv", index=False)
 
-    lda_labels = pd.Series(
-        lda_topic_matrix.argmax(axis=1) + 1,
-        name="lda_topic"
-    )
+    lda_labels = lda_topic_matrix.argmax(axis=1) + 1
 
     plot_topic_distribution(
         lda_labels,
@@ -143,27 +340,37 @@ def main():
         "lda_topic_distribution.png"
     )
 
-    print("Running NMF topic model...")
+    save_topic_examples(
+        original_texts,
+        cleaned_texts,
+        lda_topic_matrix,
+        "LDA"
+    )
+
+    # --------------------------------------------------
+    # Topic extraction method 2: NMF
+    # --------------------------------------------------
+
+    print("\nRunning NMF topic model...")
+
     nmf_model = NMF(
         n_components=N_TOPICS,
         random_state=42,
         init="nndsvda",
-        max_iter=500
+        max_iter=1000
     )
 
     nmf_topic_matrix = nmf_model.fit_transform(tfidf_matrix)
+
     nmf_topics = get_top_words(
         nmf_model,
         tfidf_vectorizer.get_feature_names_out(),
-        N_WORDS
+        N_WORDS_PER_TOPIC
     )
 
     nmf_topics.to_csv(OUTPUT_DIR / "nmf_topics.csv", index=False)
 
-    nmf_labels = pd.Series(
-        nmf_topic_matrix.argmax(axis=1) + 1,
-        name="nmf_topic"
-    )
+    nmf_labels = nmf_topic_matrix.argmax(axis=1) + 1
 
     plot_topic_distribution(
         nmf_labels,
@@ -171,24 +378,57 @@ def main():
         "nmf_topic_distribution.png"
     )
 
-    comparison_df = pd.DataFrame({
-        "clean_text": cleaned_texts.reset_index(drop=True),
-        "lda_topic": lda_labels.reset_index(drop=True),
-        "nmf_topic": nmf_labels.reset_index(drop=True)
-    })
+    save_topic_examples(
+        original_texts,
+        cleaned_texts,
+        nmf_topic_matrix,
+        "NMF"
+    )
 
-    comparison_df.to_csv(
+    # --------------------------------------------------
+    # Save final comparison files
+    # --------------------------------------------------
+
+    results_df = complaints.reset_index(drop=True).copy()
+    results_df["lda_topic"] = lda_labels
+    results_df["nmf_topic"] = nmf_labels
+
+    results_df.to_csv(
         OUTPUT_DIR / "complaints_with_topics.csv",
         index=False
     )
 
-    print("\nLDA Topics:")
-    print(lda_topics)
+    vectorizer_summary = pd.DataFrame({
+        "method": ["CountVectorizer", "TF-IDF Vectorizer"],
+        "matrix_shape": [str(count_matrix.shape), str(tfidf_matrix.shape)],
+        "used_with": ["LDA", "NMF"],
+        "reason": [
+            "CountVectorizer was used with LDA because LDA works well with word-count data.",
+            "TF-IDF was used with NMF because it highlights more specific terms in individual texts."
+        ]
+    })
 
-    print("\nNMF Topics:")
-    print(nmf_topics)
+    vectorizer_summary.to_csv(
+        OUTPUT_DIR / "vectorizer_comparison.csv",
+        index=False
+    )
 
-    print("\nAnalysis finished. Results saved in the outputs folder.")
+    # --------------------------------------------------
+    # Print final results
+    # --------------------------------------------------
+
+    print("\n==============================")
+    print("LDA Topics")
+    print("==============================")
+    print(lda_topics.to_string(index=False))
+
+    print("\n==============================")
+    print("NMF Topics")
+    print("==============================")
+    print(nmf_topics.to_string(index=False))
+
+    print("\nAnalysis complete.")
+    print(f"All output files were saved in the folder: {OUTPUT_DIR}")
 
 
 if __name__ == "__main__":
