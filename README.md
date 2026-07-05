@@ -4,31 +4,29 @@ This project analyzes consumer complaint narratives using Natural Language Proce
 
 ## Dataset
 
-The dataset used for this project is `CFPB_Consumer_Complaints_2024.csv`.
+The dataset used for this project is based on the Consumer Financial Protection Bureau Consumer Complaint Database.
 
-For file-size and repository clarity reasons, the CSV dataset is **not included directly in this GitHub repository**. To run the project, the CSV file must be placed manually inside a folder called `data`.
+Dataset source:
+Consumer Financial Protection Bureau. Consumer Complaint Database.
+https://www.consumerfinance.gov/data-research/consumer-complaints/
 
-The folder structure should be:
+Field documentation:
+Consumer Financial Protection Bureau. Consumer Complaint Database API documentation: Field reference.
+https://cfpb.github.io/api/ccdb/fields.html
 
-```text
-complaint-topic-nlp/
-│
-├── data/
-│   └── CFPB_Consumer_Complaints_2024.csv
-│
-├── outputs/
-├── main.py
-├── requirements.txt
-└── README.md
-```
+The CSV file is not included directly in this GitHub repository. To run the project, the user must download or export the complaint data from the CFPB Consumer Complaint Database and place the file manually inside a folder called `data`.
 
-The main text column used for the analysis is:
+The required file path is:
 
-```text
-consumer_complaint_narrative
-```
+`data/CFPB_Consumer_Complaints_2024.csv`
 
-The dataset contained 500 rows and 18 columns. After removing missing and duplicate complaint narratives, 200 texts remained. After text cleaning and filtering very short texts, 173 complaint narratives were used for the final topic analysis.
+The main text column used for the NLP analysis is:
+
+`consumer_complaint_narrative`
+
+This column contains the written complaint narrative used for topic extraction.
+
+In the dataset used for this project, there were 500 rows and 18 columns. After removing missing and duplicate complaint narratives, 200 texts remained. After text cleaning and filtering very short texts, 173 complaint narratives were used for the final topic analysis.
 
 ## Methods
 
