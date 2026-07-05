@@ -16,7 +16,7 @@ from sklearn.feature_extraction.text import (
 # Project settings
 # --------------------------------------------------
 
-DATA_PATH = Path("data/CFPB_Consumer_Complaints_2024.csv")
+DATA_PATH = Path("data/CFPB_Consumer_Complaints_2024.csv") #path to file
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
