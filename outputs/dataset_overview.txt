@@ -1,0 +1,5 @@
+Dataset shape: (500, 18)
+Columns: ['date_received', 'product', 'subproduct', 'issue', 'subissue', 'consumer_complaint_narrative', 'company_public_response', 'company_name', 'state', 'zip_code', 'tags', 'consumer_consent_provided', 'submitted_via', 'date_sent_to_company', 'company_response_to_consumer', 'timely_response', 'consumer_disputed', 'complaint_id']
+Text column used: consumer_complaint_narrative
+Missing narratives: 300
+Non-empty narratives: 200

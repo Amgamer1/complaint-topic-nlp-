@@ -1,0 +1,3 @@
+method,matrix_shape,used_with,reason
+CountVectorizer,"(173, 1383)",LDA,CountVectorizer was used with LDA because LDA works well with word-count data.
+TF-IDF Vectorizer,"(173, 1383)",NMF,TF-IDF was used with NMF because it highlights more specific terms in individual texts.
